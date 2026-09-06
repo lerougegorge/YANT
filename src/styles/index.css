@@ -1,0 +1,70 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-50: #f0fdf4;
+  --color-brand-100: #dcfce7;
+  --color-brand-200: #bbf7d0;
+  --color-brand-500: #22c55e;
+  --color-brand-600: #16a34a;
+  --color-brand-700: #15803d;
+  --color-warn-500: #f59e0b;
+  --color-warn-600: #d97706;
+  --color-danger-500: #ef4444;
+  --color-danger-600: #dc2626;
+}
+
+:root {
+  color-scheme: light;
+  --bg: #f8faf9;
+  --bg-elevated: #ffffff;
+  --fg: #0f172a;
+  --fg-muted: #64748b;
+  --border: #e2e8f0;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0b1220;
+  --bg-elevated: #131e2f;
+  --fg: #e2e8f0;
+  --fg-muted: #94a3b8;
+  --border: #1f2c40;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--fg);
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: contain;
+}
+
+/* Minimum comfortable tap target everywhere an icon-only control appears. */
+.tap-target {
+  min-width: 36px;
+  min-height: 36px;
+}
+
+.select {
+  border: 1px solid var(--border);
+  background: transparent;
+  border-radius: 0.5rem;
+  padding: 0.375rem 0.5rem;
+  font-size: 0.875rem;
+  min-height: 44px;
+}
+
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+::-webkit-scrollbar {
+  display: none;
+}
