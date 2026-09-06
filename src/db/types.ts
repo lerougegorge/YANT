@@ -177,7 +177,7 @@ export const DEFAULT_SETTINGS: Settings = {
   id: 'singleton',
   weightUnits: 'metric',
   calorieUnits: 'cal',
-  columns: ['calories', 'protein', 'carbohydrates', 'fat'],
+  columns: ['calories'],
   models: DEFAULT_ESTIMATE_MODELS,
   estimateModelOrder: ['openai/gpt-5.6-luna', 'google/gemini-3.5-flash-lite', 'anthropic/claude-haiku-4.5'],
   labelModel: 'google/gemini-3.8-flash',

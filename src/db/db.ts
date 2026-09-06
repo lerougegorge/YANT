@@ -46,6 +46,24 @@ export async function ensureSeeded(): Promise<void> {
     const existingSettings = await db.settings.get('singleton');
     if (!existingSettings) {
       await db.settings.put({ ...DEFAULT_SETTINGS });
+    } else {
+      // Backfill settings seeded by an older version of the app, but only fields that still
+      // look untouched — so a deliberate customization is never silently overwritten.
+      const patch: Partial<Settings> = {};
+      if (existingSettings.models.length === 0 && existingSettings.estimateModelOrder.length === 0 && !existingSettings.labelModel) {
+        patch.models = DEFAULT_SETTINGS.models;
+        patch.estimateModelOrder = DEFAULT_SETTINGS.estimateModelOrder;
+        patch.labelModel = DEFAULT_SETTINGS.labelModel;
+      }
+      const isOldDefaultColumns =
+        existingSettings.columns.length === 4 &&
+        ['calories', 'protein', 'carbohydrates', 'fat'].every((c, i) => existingSettings.columns[i] === c);
+      if (isOldDefaultColumns) {
+        patch.columns = DEFAULT_SETTINGS.columns;
+      }
+      if (Object.keys(patch).length > 0) {
+        await db.settings.update('singleton', { ...patch, updatedAt: Date.now() });
+      }
     }
   });
   seeded = true;
