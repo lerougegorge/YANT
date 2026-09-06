@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { Minus, Plus } from 'lucide-react';
 import type { AmountUnit } from '../db/types';
 
@@ -14,13 +15,46 @@ export function AmountControl({
   weightUnits: 'metric' | 'oz';
   onChange: (amount: number, unit: AmountUnit) => void;
 }) {
-  const step = amountUnit === 'servings' ? 0.5 : weightUnits === 'oz' ? 5 : 10;
+  // Finer-grained stepping below one serving, where the difference between e.g. 0.5 and 0.6
+  // servings actually matters; above that, half-servings are the more useful increment.
+  const step = amountUnit === 'servings' ? (amount < 1 ? 0.1 : 0.5) : weightUnits === 'oz' ? 5 : 10;
   const gramsAvailable = servingGrams !== null && servingGrams > 0;
   const massLabel = weightUnits === 'oz' ? 'oz' : 'g';
 
+  // The text box needs its own buffer distinct from `amount`: once the user types a trailing
+  // "." (e.g. entering "0.75"), Number(".") normalises straight back to "0", and if the input's
+  // displayed value were derived directly from that round-tripped number, the "." the user just
+  // typed would vanish before they can type the digits after it. Buffering the raw text lets
+  // partial input like "0." survive until it's completed, while still reporting a real number
+  // to the parent on every keystroke that parses to one.
+  const [text, setText] = useState(() => String(amount));
+  const lastReportedRef = useRef(amount);
+
+  useEffect(() => {
+    if (amount !== lastReportedRef.current) {
+      setText(String(amount));
+      lastReportedRef.current = amount;
+    }
+  }, [amount]);
+
+  function report(next: number, unit: AmountUnit) {
+    lastReportedRef.current = next;
+    onChange(next, unit);
+  }
+
   function bump(delta: number) {
     const next = Math.max(0, Math.round((amount + delta) * 100) / 100);
-    onChange(next, amountUnit);
+    setText(String(next));
+    report(next, amountUnit);
+  }
+
+  function handleTextInput(raw: string) {
+    const v = raw.replace(',', '.');
+    if (!/^\d*\.?\d*$/.test(v)) return;
+    setText(v);
+    if (v === '' || v === '.') return;
+    const n = Number(v);
+    if (!Number.isNaN(n)) report(n, amountUnit);
   }
 
   return (
@@ -39,13 +73,8 @@ export function AmountControl({
         inputMode="decimal"
         className="w-20 text-center rounded-lg border bg-transparent tap-target"
         style={{ borderColor: 'var(--border)' }}
-        value={amount}
-        onChange={(e) => {
-          const v = e.target.value.replace(',', '.');
-          const n = Number(v);
-          if (v === '' || Number.isNaN(n)) return;
-          onChange(n, amountUnit);
-        }}
+        value={text}
+        onChange={(e) => handleTextInput(e.target.value)}
       />
       <button
         className="tap-target rounded-lg border flex items-center justify-center"

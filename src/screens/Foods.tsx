@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useNavigate } from 'react-router-dom';
 import { Trash2 } from 'lucide-react';
@@ -18,8 +18,6 @@ function FoodRow({ item }: { item: FoodItem }) {
   const navigate = useNavigate();
   const settings = useSettings();
   const toast = useToast();
-  const [dragX, setDragX] = useState(0);
-  const startX = useRef<number | null>(null);
 
   const isAi = item.source === 'ai-text' || item.source === 'ai-photo' || item.source === 'ai-label';
 
@@ -38,27 +36,8 @@ function FoodRow({ item }: { item: FoodItem }) {
   }
 
   return (
-    <div className="relative overflow-hidden" style={{ borderBottom: '1px solid var(--border)' }}>
-      <button
-        className="absolute right-0 top-0 h-full w-20 flex flex-col items-center justify-center gap-0.5 text-white text-xs font-medium tap-target"
-        style={{ background: '#dc2626' }}
-        onClick={handleDelete}
-      >
-        <Trash2 size={18} strokeWidth={1.75} />
-        Delete
-      </button>
-      <button
-        className="w-full flex items-center justify-between px-3 py-2.5 text-left"
-        style={{ background: 'var(--bg-elevated)', transform: `translateX(${dragX}px)`, transition: 'transform 150ms ease' }}
-        onTouchStart={(e) => (startX.current = e.touches[0].clientX)}
-        onTouchMove={(e) => {
-          if (startX.current === null) return;
-          const dx = e.touches[0].clientX - startX.current;
-          setDragX(Math.min(0, Math.max(-80, dx)));
-        }}
-        onTouchEnd={() => setDragX((x) => (x < -36 ? -80 : 0))}
-        onClick={() => (dragX === 0 ? navigate(`/foods/${item.id}`) : setDragX(0))}
-      >
+    <div className="flex items-center gap-1" style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>
+      <button className="flex-1 min-w-0 flex items-center justify-between px-3 py-2.5 text-left tap-target" onClick={() => navigate(`/foods/${item.id}`)}>
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
             <span className="text-sm font-medium truncate">{item.description}</span>
@@ -72,6 +51,9 @@ function FoodRow({ item }: { item: FoodItem }) {
             {formatCalories(item.caloriesPerServing, settings.calorieUnits)} · {item.servingDescription}
           </div>
         </div>
+      </button>
+      <button className="tap-target shrink-0 flex items-center justify-center mr-1" style={{ color: '#dc2626' }} aria-label="Delete food" onClick={handleDelete}>
+        <Trash2 size={18} strokeWidth={1.75} />
       </button>
     </div>
   );

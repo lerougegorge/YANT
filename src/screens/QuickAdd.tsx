@@ -2,16 +2,22 @@ import { useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ChevronRight } from 'lucide-react';
 import { db } from '../db/db';
-import type { NovaGroup } from '../db/types';
+import type { AmountUnit, NovaGroup } from '../db/types';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { NumberField } from '../components/NumberField';
 import { NovaSegmented } from '../components/NovaSegmented';
 import { MealSelect } from '../components/MealSelect';
+import { AmountControl } from '../components/AmountControl';
 import { useMeals } from '../hooks/useMeals';
 import { useSettings } from '../hooks/useSettings';
 import { useDefaultMeal } from '../hooks/useDefaultMeal';
 import { kcalFromDisplay } from '../lib/units';
 import { useToast } from '../components/Toast';
+
+function dividedBy(value: number | null, divisor: number): number | null {
+  if (value === null) return null;
+  return value / divisor;
+}
 
 export function QuickAddScreen() {
   const navigate = useNavigate();
@@ -24,6 +30,8 @@ export function QuickAddScreen() {
   const nowDate = useMemo(() => new Date(), []);
 
   const [description, setDescription] = useState(prefill);
+  const [amount, setAmount] = useState(1);
+  const [amountUnit, setAmountUnit] = useState<AmountUnit>('servings');
   const [calories, setCalories] = useState<number | null>(null);
   const [caloriesUnit, setCaloriesUnit] = useState<'cal' | 'kJ'>(settings.calorieUnits);
   const [protein, setProtein] = useState<number | null>(null);
@@ -33,30 +41,82 @@ export function QuickAddScreen() {
   const [fruitVeg, setFruitVeg] = useState(false);
   const [novaGroup, setNovaGroup] = useState<NovaGroup>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [addToFoods, setAddToFoods] = useState(false);
   const [meal, setMeal] = useDefaultMeal(meals, nowDate);
   const [saving, setSaving] = useState(false);
+  const [matchPrompt, setMatchPrompt] = useState<{ existingId: string } | null>(null);
 
   async function handleLog() {
     setSaving(true);
     try {
       const now = Date.now();
+      const consumedCalories = calories !== null ? kcalFromDisplay(calories, caloriesUnit) : 0;
+      const trimmedDescription = description.trim() || 'Quick Add';
+
+      let foodItemId: string | null = null;
+
+      if (addToFoods) {
+        const existing = await db.foodItems.where('description').equalsIgnoreCase(trimmedDescription).first();
+        if (existing && !matchPrompt) {
+          setMatchPrompt({ existingId: existing.id });
+          setSaving(false);
+          return;
+        }
+
+        // The figures entered above describe the amount actually eaten, not a single serving —
+        // e.g. half a croissant at 200 kcal means the whole croissant is 400 kcal. Divide back
+        // down to a per-serving (or, for a gram amount, a per-100g) figure for the library entry.
+        const divisor = amount > 0 ? amount : 1;
+        const isGrams = amountUnit === 'grams';
+
+        const itemData = {
+          description: trimmedDescription,
+          servingDescription: isGrams ? `1 serving (${amount}g)` : '1 serving',
+          caloriesPerServing: isGrams ? consumedCalories : consumedCalories / divisor,
+          proteinPerServing: isGrams ? protein : dividedBy(protein, divisor),
+          fatPerServing: isGrams ? fat : dividedBy(fat, divisor),
+          carbohydratesPerServing: isGrams ? carbohydrates : dividedBy(carbohydrates, divisor),
+          fibrePerServing: isGrams ? fibre : dividedBy(fibre, divisor),
+          caloriesPer100g: isGrams ? (consumedCalories / divisor) * 100 : null,
+          proteinPer100g: isGrams ? dividedBy(protein, divisor / 100) : null,
+          fatPer100g: isGrams ? dividedBy(fat, divisor / 100) : null,
+          carbohydratesPer100g: isGrams ? dividedBy(carbohydrates, divisor / 100) : null,
+          fibrePer100g: isGrams ? dividedBy(fibre, divisor / 100) : null,
+          novaGroup,
+          fruitVeg,
+          servingGrams: isGrams ? amount : null,
+          servings: null,
+          notes: null,
+          source: 'manual' as const,
+          updatedAt: now
+        };
+
+        if (matchPrompt) {
+          await db.foodItems.update(matchPrompt.existingId, itemData);
+          foodItemId = matchPrompt.existingId;
+        } else {
+          foodItemId = crypto.randomUUID();
+          await db.foodItems.add({ id: foodItemId, createdAt: now, barcode: null, useCount: 1, lastUsedAt: now, ...itemData });
+        }
+      }
+
       await db.foodInstances.add({
         id: crypto.randomUUID(),
         createdAt: now,
         updatedAt: now,
         timestamp: now,
         meal,
-        description: description.trim() || 'Quick Add',
-        calories: calories !== null ? kcalFromDisplay(calories, caloriesUnit) : 0,
+        description: trimmedDescription,
+        calories: consumedCalories,
         protein,
         fat,
         carbohydrates,
         fibre,
         fruitVeg,
         novaGroup,
-        foodItemId: null,
-        amount: 1,
-        amountUnit: 'servings',
+        foodItemId,
+        amount,
+        amountUnit,
         servingDescription: null,
         source: 'manual'
       });
@@ -82,23 +142,35 @@ export function QuickAddScreen() {
           />
         </label>
 
-        <NumberField
-          label="Calories"
-          value={calories}
-          onChange={setCalories}
-          suffix={
-            <select
-              className="rounded-lg border bg-transparent px-2 tap-target text-sm"
-              style={{ borderColor: 'var(--border)' }}
-              value={caloriesUnit}
-              onChange={(e) => setCaloriesUnit(e.target.value as 'cal' | 'kJ')}
-              aria-label="Calorie unit"
-            >
-              <option value="cal">cal</option>
-              <option value="kJ">kJ</option>
-            </select>
-          }
-        />
+        <div>
+          <div className="text-sm mb-1" style={{ color: 'var(--fg-muted)' }}>
+            Amount
+          </div>
+          <AmountControl amount={amount} amountUnit={amountUnit} servingGrams={1} weightUnits={settings.weightUnits} onChange={(a, u) => { setAmount(a); setAmountUnit(u); }} />
+        </div>
+
+        <div>
+          <NumberField
+            label="Calories"
+            value={calories}
+            onChange={setCalories}
+            suffix={
+              <select
+                className="rounded-lg border bg-transparent px-2 tap-target text-sm"
+                style={{ borderColor: 'var(--border)' }}
+                value={caloriesUnit}
+                onChange={(e) => setCaloriesUnit(e.target.value as 'cal' | 'kJ')}
+                aria-label="Calorie unit"
+              >
+                <option value="cal">cal</option>
+                <option value="kJ">kJ</option>
+              </select>
+            }
+          />
+          <p className="text-xs mt-1" style={{ color: 'var(--fg-muted)' }}>
+            For the amount above, not per serving — e.g. half eaten at 200 kcal means the whole thing is 400 kcal.
+          </p>
+        </div>
 
         <div>
           <div className="text-sm mb-1" style={{ color: 'var(--fg-muted)' }}>
@@ -136,12 +208,31 @@ export function QuickAddScreen() {
             </div>
           </div>
         )}
+
+        {matchPrompt && (
+          <div className="rounded-lg p-3 text-sm flex flex-col gap-2" style={{ background: '#fffbeb', border: '1px solid #fde68a' }}>
+            <span>A Food Item with this exact description already exists. Update it instead of creating a duplicate?</span>
+            <div className="flex gap-2">
+              <button className="font-semibold" style={{ color: '#16a34a' }} onClick={handleLog}>
+                Yes, update it
+              </button>
+              <button style={{ color: 'var(--fg-muted)' }} onClick={() => setMatchPrompt(null)}>
+                No, cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" className="tap-target" checked={addToFoods} onChange={(e) => setAddToFoods(e.target.checked)} />
+          Add to Food Library
+        </label>
       </div>
       <div className="p-4 safe-bottom">
         <button
           className="w-full rounded-lg py-3 font-semibold text-white tap-target disabled:opacity-50"
           style={{ background: '#16a34a' }}
-          disabled={saving}
+          disabled={saving || !!matchPrompt}
           onClick={handleLog}
         >
           Log

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, ChevronUp, ExternalLink, Image as ImageIcon, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, ExternalLink, Image as ImageIcon, Plus, Trash2 } from 'lucide-react';
 import { db } from '../db/db';
-import { SCHEMA_VERSION, type ColumnKey, type Goal, type GoalMeasurement, type GoalOperator, type Meal } from '../db/types';
+import { SCHEMA_VERSION, type ColumnKey, type Goal, type GoalMeasurement, type GoalOperator, type Meal, type ModelInfo } from '../db/types';
 import { ScreenHeader } from '../components/ScreenHeader';
+import { BottomSheet } from '../components/BottomSheet';
 import { useSettings, updateSettings } from '../hooks/useSettings';
 import { useMeals } from '../hooks/useMeals';
 import { useGoals } from '../hooks/useGoals';
@@ -281,8 +282,8 @@ function GoalsSection({ goals }: { goals: Goal[] }) {
                 value={goal.operator}
                 onChange={(e) => db.goals.update(goal.id, { operator: e.target.value as GoalOperator, updatedAt: Date.now() })}
               >
-                <option value=">=">≥</option>
-                <option value="<=">≤</option>
+                <option value=">=">At least</option>
+                <option value="<=">At most</option>
               </select>
             )}
             {goal.measurement !== 'fiveADay' && (
@@ -388,11 +389,10 @@ function OpenRouterSection({ settingsKey }: { settingsKey: string }) {
 
 function ModelsSection() {
   const settings = useSettings();
-  const [filter, setFilter] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const toast = useToast();
 
-  const filteredModels = settings.models.filter((m) => m.name.toLowerCase().includes(filter.toLowerCase()));
   const orderedEstimateModels = settings.estimateModelOrder.map((id) => settings.models.find((m) => m.id === id)).filter((m): m is NonNullable<typeof m> => !!m);
 
   async function refresh() {
@@ -413,9 +413,8 @@ function ModelsSection() {
     }
   }
 
-  function toggleInOrder(id: string) {
-    const inOrder = settings.estimateModelOrder.includes(id);
-    updateSettings({ estimateModelOrder: inOrder ? settings.estimateModelOrder.filter((x) => x !== id) : [...settings.estimateModelOrder, id] });
+  function removeFromOrder(id: string) {
+    updateSettings({ estimateModelOrder: settings.estimateModelOrder.filter((x) => x !== id) });
   }
 
   return (
@@ -426,63 +425,114 @@ function ModelsSection() {
         </button>
       </div>
 
-      {settings.models.length > 0 && (
-        <>
-          <input
-            className="w-full rounded-lg border bg-transparent px-3 py-1.5 text-sm tap-target"
-            style={{ borderColor: 'var(--border)' }}
-            placeholder="Filter by name"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-          />
-          <div className="flex flex-col gap-1 max-h-56 overflow-y-auto">
-            {filteredModels.map((m) => (
-              <label key={m.id} className="flex items-center justify-between text-xs py-1" style={{ borderBottom: '1px solid var(--border)' }}>
-                <span className="flex items-center gap-1.5 min-w-0">
-                  <input type="checkbox" className="tap-target" checked={settings.estimateModelOrder.includes(m.id)} onChange={() => toggleInOrder(m.id)} />
-                  <span className="truncate">{m.name}</span>
-                  {m.supportsImages && <ImageIcon size={14} strokeWidth={1.75} aria-label="Supports images" style={{ color: 'var(--fg-muted)' }} />}
-                </span>
-                <span style={{ color: 'var(--fg-muted)' }} className="shrink-0">
-                  ${(m.promptPrice * 1e6).toFixed(2)}/${(m.completionPrice * 1e6).toFixed(2)} per M
-                </span>
-              </label>
-            ))}
+      <div className="text-xs font-medium mt-1" style={{ color: 'var(--fg-muted)' }}>
+        Estimate order (first = initial estimate)
+      </div>
+      {orderedEstimateModels.length === 0 && (
+        <p className="text-xs" style={{ color: 'var(--fg-muted)' }}>
+          No models added yet.
+        </p>
+      )}
+      <div className="flex flex-col gap-1">
+        {orderedEstimateModels.map((m, idx) => (
+          <div key={m.id} className="flex items-center justify-between gap-2 text-xs py-1">
+            <span className="truncate flex-1">
+              {idx + 1}. {m.name}
+            </span>
+            <ReorderButtons
+              onUp={() => updateSettings({ estimateModelOrder: move(settings.estimateModelOrder, settings.estimateModelOrder.indexOf(m.id), -1) })}
+              onDown={() => updateSettings({ estimateModelOrder: move(settings.estimateModelOrder, settings.estimateModelOrder.indexOf(m.id), 1) })}
+            />
+            <button className="tap-target flex items-center justify-center" style={{ color: '#dc2626' }} aria-label="Remove model" onClick={() => removeFromOrder(m.id)}>
+              <Trash2 size={14} strokeWidth={1.75} />
+            </button>
           </div>
+        ))}
+      </div>
+      <button className="flex items-center gap-1 text-sm font-medium text-left" style={{ color: '#16a34a' }} onClick={() => setAddOpen(true)}>
+        <Plus size={16} strokeWidth={1.75} />
+        Add model
+      </button>
 
-          <div className="text-xs font-medium mt-1" style={{ color: 'var(--fg-muted)' }}>
-            Estimate order (first = initial estimate)
-          </div>
-          <div className="flex flex-col gap-1">
-            {orderedEstimateModels.map((m, idx) => (
-              <div key={m.id} className="flex items-center justify-between text-xs py-1">
-                <span className="truncate">
-                  {idx + 1}. {m.name}
-                </span>
-                <ReorderButtons
-                  onUp={() => updateSettings({ estimateModelOrder: move(settings.estimateModelOrder, settings.estimateModelOrder.indexOf(m.id), -1) })}
-                  onDown={() => updateSettings({ estimateModelOrder: move(settings.estimateModelOrder, settings.estimateModelOrder.indexOf(m.id), 1) })}
-                />
-              </div>
-            ))}
-          </div>
+      <div className="text-xs font-medium mt-2" style={{ color: 'var(--fg-muted)' }}>
+        Label transcription model
+      </div>
+      <select className="select" value={settings.labelModel ?? ''} onChange={(e) => updateSettings({ labelModel: e.target.value || null })}>
+        <option value="">Not set</option>
+        {settings.models
+          .filter((m) => m.supportsImages)
+          .map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name}
+            </option>
+          ))}
+      </select>
 
-          <div className="text-xs font-medium mt-2" style={{ color: 'var(--fg-muted)' }}>
-            Label transcription model
-          </div>
-          <select className="select" value={settings.labelModel ?? ''} onChange={(e) => updateSettings({ labelModel: e.target.value || null })}>
-            <option value="">Not set</option>
-            {settings.models
-              .filter((m) => m.supportsImages)
-              .map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
-          </select>
-        </>
+      {addOpen && (
+        <AddModelModal
+          models={settings.models}
+          alreadyAdded={settings.estimateModelOrder}
+          onAdd={(id) => updateSettings({ estimateModelOrder: [...settings.estimateModelOrder, id] })}
+          onClose={() => setAddOpen(false)}
+        />
       )}
     </Section>
+  );
+}
+
+function AddModelModal({
+  models,
+  alreadyAdded,
+  onAdd,
+  onClose
+}: {
+  models: ModelInfo[];
+  alreadyAdded: string[];
+  onAdd: (id: string) => void;
+  onClose: () => void;
+}) {
+  const [filter, setFilter] = useState('');
+  const toast = useToast();
+  const available = models.filter((m) => !alreadyAdded.includes(m.id) && m.name.toLowerCase().includes(filter.toLowerCase()));
+
+  return (
+    <BottomSheet title="Add model" onClose={onClose}>
+      <div className="flex flex-col gap-3">
+        <input
+          autoFocus
+          className="w-full rounded-lg border bg-transparent px-3 py-2 text-sm tap-target"
+          style={{ borderColor: 'var(--border)' }}
+          placeholder="Search models"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        />
+        <div className="flex flex-col divide-y max-h-[55vh] overflow-y-auto" style={{ borderColor: 'var(--border)' }}>
+          {available.map((m) => (
+            <button
+              key={m.id}
+              className="flex items-center justify-between gap-2 py-3 text-left text-sm tap-target"
+              onClick={() => {
+                onAdd(m.id);
+                toast.show(`Added ${m.name}`);
+              }}
+            >
+              <span className="flex items-center gap-1.5 min-w-0">
+                <span className="truncate">{m.name}</span>
+                {m.supportsImages && <ImageIcon size={14} strokeWidth={1.75} aria-label="Supports images" style={{ color: 'var(--fg-muted)' }} />}
+              </span>
+              <span className="text-xs shrink-0" style={{ color: 'var(--fg-muted)' }}>
+                ${(m.promptPrice * 1e6).toFixed(2)}/${(m.completionPrice * 1e6).toFixed(2)} per M
+              </span>
+            </button>
+          ))}
+          {available.length === 0 && (
+            <p className="text-xs py-6 text-center" style={{ color: 'var(--fg-muted)' }}>
+              {models.length === 0 ? 'No models yet — refresh the model list first.' : 'No matching models.'}
+            </p>
+          )}
+        </div>
+      </div>
+    </BottomSheet>
   );
 }
 

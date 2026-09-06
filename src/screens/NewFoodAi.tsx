@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Camera, ChevronRight, X } from 'lucide-react';
+import { Camera, ChevronRight, Image as ImageIcon, X } from 'lucide-react';
 import { db } from '../db/db';
 import type { FoodSource, NovaGroup } from '../db/types';
 import { ScreenHeader } from '../components/ScreenHeader';
@@ -31,7 +31,8 @@ export function NewFoodAiScreen() {
   const meals = useMeals();
   const settings = useSettings();
   const toast = useToast();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const libraryInputRef = useRef<HTMLInputElement>(null);
 
   const prefillDescription = (location.state as { description?: string } | null)?.description ?? '';
 
@@ -179,14 +180,24 @@ export function NewFoodAiScreen() {
 
           <div>
             {!photoDataUrl ? (
-              <button
-                className="w-full flex items-center justify-center gap-2 rounded-lg py-3 tap-target text-sm font-medium"
-                style={{ border: '1px solid var(--border)' }}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <Camera size={18} strokeWidth={1.75} />
-                Add a photo (optional)
-              </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  className="flex items-center justify-center gap-2 rounded-lg py-3 tap-target text-sm font-medium"
+                  style={{ border: '1px solid var(--border)' }}
+                  onClick={() => cameraInputRef.current?.click()}
+                >
+                  <Camera size={18} strokeWidth={1.75} />
+                  Take photo
+                </button>
+                <button
+                  className="flex items-center justify-center gap-2 rounded-lg py-3 tap-target text-sm font-medium"
+                  style={{ border: '1px solid var(--border)' }}
+                  onClick={() => libraryInputRef.current?.click()}
+                >
+                  <ImageIcon size={18} strokeWidth={1.75} />
+                  Upload photo
+                </button>
+              </div>
             ) : (
               <div className="flex items-center gap-3">
                 <img src={photoDataUrl} alt="Attached food" className="h-16 w-16 rounded-lg object-cover" />
@@ -196,14 +207,8 @@ export function NewFoodAiScreen() {
                 </button>
               </div>
             )}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              className="hidden"
-              onChange={handlePhotoChange}
-            />
+            <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoChange} />
+            <input ref={libraryInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} />
           </div>
 
           <div>

@@ -131,14 +131,56 @@ export const DEFAULT_MEALS: Omit<Meal, 'id' | 'createdAt' | 'updatedAt'>[] = [
 
 export const SCHEMA_VERSION = 1;
 
+// Seeded so the app is immediately useful without first having to fetch the full catalog —
+// "Refresh model list" later replaces this wholesale with live data (keeping these selections
+// as long as the ids still exist), so stale pricing here just gets corrected on first refresh.
+const DEFAULT_ESTIMATE_MODELS: ModelInfo[] = [
+  {
+    id: 'openai/gpt-5.6-luna',
+    name: 'OpenAI: GPT-5.6 Luna',
+    supportsImages: true,
+    supportsStructuredOutput: true,
+    promptPrice: 0.0000002,
+    completionPrice: 0.0000012,
+    lastFetchedAt: 0
+  },
+  {
+    id: 'google/gemini-3.5-flash-lite',
+    name: 'Google: Gemini 3.5 Flash Lite',
+    supportsImages: true,
+    supportsStructuredOutput: true,
+    promptPrice: 0.0000003,
+    completionPrice: 0.0000025,
+    lastFetchedAt: 0
+  },
+  {
+    id: 'anthropic/claude-haiku-4.5',
+    name: 'Anthropic: Claude Haiku 4.5',
+    supportsImages: true,
+    supportsStructuredOutput: true,
+    promptPrice: 0.000001,
+    completionPrice: 0.000005,
+    lastFetchedAt: 0
+  },
+  {
+    id: 'google/gemini-3.8-flash',
+    name: 'Google: Gemini 3.8 Flash',
+    supportsImages: true,
+    supportsStructuredOutput: true,
+    promptPrice: 0.00000075,
+    completionPrice: 0.00000375,
+    lastFetchedAt: 0
+  }
+];
+
 export const DEFAULT_SETTINGS: Settings = {
   id: 'singleton',
   weightUnits: 'metric',
   calorieUnits: 'cal',
   columns: ['calories', 'protein', 'carbohydrates', 'fat'],
-  models: [],
-  estimateModelOrder: [],
-  labelModel: null,
+  models: DEFAULT_ESTIMATE_MODELS,
+  estimateModelOrder: ['openai/gpt-5.6-luna', 'google/gemini-3.5-flash-lite', 'anthropic/claude-haiku-4.5'],
+  labelModel: 'google/gemini-3.8-flash',
   openRouterKey: '',
   offEnabled: true,
   theme: 'system',

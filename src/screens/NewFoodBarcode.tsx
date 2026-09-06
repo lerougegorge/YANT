@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Camera, ScanBarcode, X } from 'lucide-react';
+import { Camera, Image as ImageIcon, ScanBarcode, X } from 'lucide-react';
 import { db } from '../db/db';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { LoadingOverlay } from '../components/LoadingOverlay';
@@ -19,7 +19,8 @@ export function NewFoodBarcodeScreen() {
   const { openLogSheet } = useSheets();
   const toast = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const labelFileInputRef = useRef<HTMLInputElement>(null);
+  const labelCameraInputRef = useRef<HTMLInputElement>(null);
+  const labelLibraryInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const [barcode, setBarcode] = useState('');
@@ -281,22 +282,31 @@ export function NewFoodBarcodeScreen() {
         )}
 
         <div>
-          <button
-            className="w-full flex items-center justify-center gap-2 rounded-lg py-3 tap-target text-sm font-medium disabled:opacity-50"
-            style={{ border: '1px solid var(--border)' }}
-            disabled={labelLoading}
-            onClick={() => labelFileInputRef.current?.click()}
-          >
-            {labelLoading ? (
-              'Reading label…'
-            ) : (
-              <>
-                <Camera size={18} strokeWidth={1.75} />
-                Nutrition label (optional)
-              </>
-            )}
-          </button>
-          <input ref={labelFileInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleLabelPhoto} />
+          <div className="text-xs mb-1" style={{ color: 'var(--fg-muted)' }}>
+            Nutrition label (optional)
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              className="flex items-center justify-center gap-2 rounded-lg py-3 tap-target text-sm font-medium disabled:opacity-50"
+              style={{ border: '1px solid var(--border)' }}
+              disabled={labelLoading}
+              onClick={() => labelCameraInputRef.current?.click()}
+            >
+              <Camera size={18} strokeWidth={1.75} />
+              {labelLoading ? 'Reading…' : 'Take photo'}
+            </button>
+            <button
+              className="flex items-center justify-center gap-2 rounded-lg py-3 tap-target text-sm font-medium disabled:opacity-50"
+              style={{ border: '1px solid var(--border)' }}
+              disabled={labelLoading}
+              onClick={() => labelLibraryInputRef.current?.click()}
+            >
+              <ImageIcon size={18} strokeWidth={1.75} />
+              {labelLoading ? 'Reading…' : 'Upload photo'}
+            </button>
+          </div>
+          <input ref={labelCameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleLabelPhoto} />
+          <input ref={labelLibraryInputRef} type="file" accept="image/*" className="hidden" onChange={handleLabelPhoto} />
           {labelError && (
             <div className="mt-2 rounded-lg p-2 text-xs" style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b' }}>
               Error: unusable response — {labelError}
