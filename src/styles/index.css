@@ -63,8 +63,18 @@ body {
   background: transparent;
   border-radius: 0.5rem;
   padding: 0.375rem 0.5rem;
-  font-size: 0.875rem;
   min-height: 44px;
+}
+
+/* Mobile Safari and Chrome zoom the whole page in on focus of any text input, select or
+   textarea rendered under 16px, then leave it zoomed until the user manually pinches back
+   out — on any screen, not just the one that was focused. Several call sites set a smaller
+   Tailwind text-size utility directly on the control (e.g. `text-sm`, `text-xs`), which beats
+   a plain type-selector rule on specificity, so !important is needed to guarantee this everywhere. */
+input,
+select,
+textarea {
+  font-size: 16px !important;
 }
 
 .safe-bottom {

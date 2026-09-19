@@ -11,6 +11,7 @@ import { AmountControl } from '../components/AmountControl';
 import { useMeals } from '../hooks/useMeals';
 import { useSettings } from '../hooks/useSettings';
 import { useDefaultMeal } from '../hooks/useDefaultMeal';
+import { defaultLogTime } from '../lib/date';
 import { kcalFromDisplay } from '../lib/units';
 import { useToast } from '../components/Toast';
 
@@ -26,8 +27,9 @@ export function QuickAddScreen() {
   const settings = useSettings();
   const toast = useToast();
 
-  const prefill = (location.state as { description?: string } | null)?.description ?? '';
-  const nowDate = useMemo(() => new Date(), []);
+  const state = location.state as { description?: string; day?: number } | null;
+  const prefill = state?.description ?? '';
+  const nowDate = useMemo(() => defaultLogTime(state?.day !== undefined ? new Date(state.day) : new Date()), [state?.day]);
 
   const [description, setDescription] = useState(prefill);
   const [amount, setAmount] = useState(1);
@@ -104,7 +106,7 @@ export function QuickAddScreen() {
         id: crypto.randomUUID(),
         createdAt: now,
         updatedAt: now,
-        timestamp: now,
+        timestamp: nowDate.getTime(),
         meal,
         description: trimmedDescription,
         calories: consumedCalories,

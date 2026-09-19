@@ -30,3 +30,15 @@ export function fromDateInputValue(value: string): Date {
   const [y, m, d] = value.split('-').map(Number);
   return new Date(y, m - 1, d);
 }
+
+/**
+ * The moment to log a new entry against, for a day chosen on the Home screen. A past or
+ * future day has no natural "now", so it defaults to noon local time on that day; today
+ * still gets the actual current time, unchanged from the previous behaviour.
+ */
+export function defaultLogTime(day: Date): Date {
+  if (isSameDay(day, new Date())) return new Date();
+  const d = new Date(day);
+  d.setHours(12, 0, 0, 0);
+  return d;
+}

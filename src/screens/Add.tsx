@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useNavigate } from 'react-router-dom';
-import { ScanBarcode, Sparkles, Zap } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { Search, Sparkles, Zap } from 'lucide-react';
 import { db } from '../db/db';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { useSheets } from '../components/SheetContext';
@@ -11,9 +11,14 @@ import { useSettings } from '../hooks/useSettings';
 
 export function AddScreen() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { openLogSheet } = useSheets();
   const settings = useSettings();
   const [query, setQuery] = useState('');
+
+  // The day being logged against, carried from the Home screen's + button (undefined, and so
+  // today, when arriving here any other way — e.g. the bottom nav).
+  const day = (location.state as { day?: number } | null)?.day;
 
   const now = useMemo(() => new Date(), []);
   const recentSuggestions = useLiveQuery(() => getTimeBasedSuggestions(now), [now]) ?? [];
@@ -51,7 +56,7 @@ export function AddScreen() {
             <button
               key={item.id}
               className="flex items-center justify-between py-3 text-left tap-target"
-              onClick={() => openLogSheet(item)}
+              onClick={() => openLogSheet(item, day)}
             >
               <div className="min-w-0">
                 <div className="text-sm font-medium truncate">{item.description}</div>
@@ -62,15 +67,27 @@ export function AddScreen() {
               <div className="text-sm shrink-0 pl-2">{formatCalories(item.caloriesPerServing, settings.calorieUnits)}</div>
             </button>
           ))}
-          {noMatch && (
-            <button
-              className="flex items-center py-3 text-left tap-target"
-              onClick={() => navigate('/add/quick', { state: { description: trimmed } })}
-            >
-              <span className="text-sm">
-                Quick add "<span className="font-medium">{trimmed}</span>"
-              </span>
-            </button>
+          {trimmed && (
+            <>
+              <button
+                className="flex items-center gap-2 py-3 text-left tap-target"
+                onClick={() => navigate('/add/quick', { state: { description: trimmed, day } })}
+              >
+                <Zap size={16} strokeWidth={1.75} style={{ color: 'var(--fg-muted)' }} />
+                <span className="text-sm">
+                  Quick add "<span className="font-medium">{trimmed}</span>"
+                </span>
+              </button>
+              <button
+                className="flex items-center gap-2 py-3 text-left tap-target"
+                onClick={() => navigate('/add/search', { state: { query: trimmed, day } })}
+              >
+                <Search size={16} strokeWidth={1.75} style={{ color: 'var(--fg-muted)' }} />
+                <span className="text-sm">
+                  Search for "<span className="font-medium">{trimmed}</span>"
+                </span>
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -79,7 +96,7 @@ export function AddScreen() {
         <button
           className="flex flex-col items-center gap-1 rounded-xl py-3 tap-target"
           style={{ border: '1px solid var(--border)' }}
-          onClick={() => navigate('/add/ai', { state: { description: trimmed } })}
+          onClick={() => navigate('/add/ai', { state: { description: trimmed, day } })}
         >
           <Sparkles size={22} strokeWidth={1.75} />
           <span className="text-xs font-medium">AI</span>
@@ -87,7 +104,7 @@ export function AddScreen() {
         <button
           className="flex flex-col items-center gap-1 rounded-xl py-3 tap-target"
           style={{ border: '1px solid var(--border)' }}
-          onClick={() => navigate('/add/quick', { state: { description: trimmed } })}
+          onClick={() => navigate('/add/quick', { state: { description: trimmed, day } })}
         >
           <Zap size={22} strokeWidth={1.75} />
           <span className="text-xs font-medium">Quick Add</span>
@@ -95,10 +112,10 @@ export function AddScreen() {
         <button
           className="flex flex-col items-center gap-1 rounded-xl py-3 tap-target"
           style={{ border: '1px solid var(--border)' }}
-          onClick={() => navigate('/add/barcode')}
+          onClick={() => navigate('/add/search', { state: { day } })}
         >
-          <ScanBarcode size={22} strokeWidth={1.75} />
-          <span className="text-xs font-medium">Barcode</span>
+          <Search size={22} strokeWidth={1.75} />
+          <span className="text-xs font-medium">Search</span>
         </button>
       </div>
     </div>

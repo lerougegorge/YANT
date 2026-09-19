@@ -7,7 +7,7 @@ import { HomeScreen } from './screens/Home';
 import { AddScreen } from './screens/Add';
 import { NewFoodAiScreen } from './screens/NewFoodAi';
 import { QuickAddScreen } from './screens/QuickAdd';
-import { NewFoodBarcodeScreen } from './screens/NewFoodBarcode';
+import { NewFoodSearchScreen } from './screens/NewFoodSearch';
 import { FoodsScreen } from './screens/Foods';
 import { FoodEditScreen } from './screens/FoodEdit';
 import { AnalysisScreen } from './screens/Analysis';
@@ -23,7 +23,7 @@ function AppShell() {
         <Route path="/add" element={<AddScreen />} />
         <Route path="/add/ai" element={<NewFoodAiScreen />} />
         <Route path="/add/quick" element={<QuickAddScreen />} />
-        <Route path="/add/barcode" element={<NewFoodBarcodeScreen />} />
+        <Route path="/add/search" element={<NewFoodSearchScreen />} />
         <Route path="/foods" element={<FoodsScreen />} />
         <Route path="/foods/:id" element={<FoodEditScreen />} />
         <Route path="/analysis" element={<AnalysisScreen />} />

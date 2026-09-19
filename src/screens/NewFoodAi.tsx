@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Camera, ChevronRight, Image as ImageIcon, X } from 'lucide-react';
+import { Camera, ChevronRight, Image as ImageIcon, Sparkles, Tag, X } from 'lucide-react';
 import { db } from '../db/db';
 import type { FoodSource, NovaGroup } from '../db/types';
 import { ScreenHeader } from '../components/ScreenHeader';
@@ -9,13 +9,18 @@ import { NumberField } from '../components/NumberField';
 import { NovaSegmented } from '../components/NovaSegmented';
 import { MealSelect } from '../components/MealSelect';
 import { AmountControl } from '../components/AmountControl';
+import { FoodItemForm, emptyFoodFormState, toPer100g, type FoodFormState } from '../components/FoodItemForm';
 import { useMeals } from '../hooks/useMeals';
 import { useSettings } from '../hooks/useSettings';
 import { useDefaultMeal } from '../hooks/useDefaultMeal';
-import { AiCallError, callFoodEstimate, downscaleImageToDataUrl, estimateCallCost, type CallUsage } from '../lib/openrouter';
+import { useSheets } from '../components/SheetContext';
+import { defaultLogTime } from '../lib/date';
+import { AiCallError, callFoodEstimate, callLabelTranscription, downscaleImageToDataUrl, estimateCallCost, type CallUsage } from '../lib/openrouter';
 import type { NutrientField } from '../lib/aiSchema';
 import { emptyLocks, mergeResponses, totalCost, type ContributingResponse, type FailedResponse, type LockedFields } from '../lib/merge';
 import { useToast } from '../components/Toast';
+
+type AiMode = 'analyse' | 'label';
 
 const NUTRIENT_LABELS: Record<NutrientField, string> = {
   calories: 'Calories',
@@ -25,18 +30,174 @@ const NUTRIENT_LABELS: Record<NutrientField, string> = {
   fibre: 'Fibre'
 };
 
+const AI_MODE_OPTIONS: { value: AiMode; label: string; icon: typeof Sparkles }[] = [
+  { value: 'analyse', label: 'Analyse food', icon: Sparkles },
+  { value: 'label', label: 'Scan label', icon: Tag }
+];
+
+/** Analyse food vs. scan a label are different tasks (estimation vs. transcription — see the
+ * AI Integration section) reached from one entry point. Photo analysis is the dominant case,
+ * so this is a lightweight toggle with a sticky default, not a screen you must answer first. */
+function AiModeToggle({ mode, onChange }: { mode: AiMode; onChange: (m: AiMode) => void }) {
+  return (
+    <div className="flex rounded-lg p-1 gap-1" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }} role="group" aria-label="AI mode">
+      {AI_MODE_OPTIONS.map((opt) => {
+        const active = opt.value === mode;
+        const Icon = opt.icon;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            className="flex-1 flex items-center justify-center gap-1.5 rounded-md py-2 text-sm font-medium tap-target"
+            style={{ background: active ? '#16a34a' : 'transparent', color: active ? 'white' : 'var(--fg)' }}
+            aria-pressed={active}
+            onClick={() => onChange(opt.value)}
+          >
+            <Icon size={15} strokeWidth={1.75} />
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function NewFoodAiScreen() {
   const navigate = useNavigate();
   const location = useLocation();
   const meals = useMeals();
   const settings = useSettings();
   const toast = useToast();
+  const { openLogSheet } = useSheets();
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const libraryInputRef = useRef<HTMLInputElement>(null);
+  const labelCameraInputRef = useRef<HTMLInputElement>(null);
+  const labelLibraryInputRef = useRef<HTMLInputElement>(null);
 
-  const prefillDescription = (location.state as { description?: string } | null)?.description ?? '';
+  const navState = location.state as { description?: string; day?: number } | null;
+  const prefillDescription = navState?.description ?? '';
+  const day = navState?.day;
 
-  const nowDate = useMemo(() => new Date(), []);
+  const nowDate = useMemo(() => defaultLogTime(navState?.day !== undefined ? new Date(navState.day) : new Date()), [navState?.day]);
+
+  // Photo analysis is the overwhelming majority of AI use; label scanning is a distinct task
+  // (transcription, not estimation — see the AI Integration section of the spec) reached from
+  // the same entry point. Defaulting here to 'analyse' means the common case is unchanged from
+  // before this toggle existed.
+  const [mode, setMode] = useState<AiMode>('analyse');
+
+  // --- Label scan state (mode === 'label') ---
+  const [labelPhase, setLabelPhase] = useState<'capture' | 'form'>('capture');
+  const [labelForm, setLabelForm] = useState<FoodFormState>(emptyFoodFormState());
+  const [labelAdvancedOpen, setLabelAdvancedOpen] = useState(false);
+  const [labelLoading, setLabelLoading] = useState(false);
+  const [labelError, setLabelError] = useState<string | null>(null);
+  const [labelSaving, setLabelSaving] = useState(false);
+  const [labelMatchPrompt, setLabelMatchPrompt] = useState<{ existingId: string; andLog: boolean } | null>(null);
+
+  async function handleLabelPhoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const model = settings.models.find((m) => m.id === settings.labelModel);
+    if (!model) {
+      toast.show('Set a label transcription model in Settings first');
+      return;
+    }
+    setLabelLoading(true);
+    setLabelError(null);
+    try {
+      const dataUrl = await downscaleImageToDataUrl(file);
+      const result = await callLabelTranscription({
+        apiKey: settings.openRouterKey,
+        model,
+        imageBase64: dataUrl,
+        productDescription: labelForm.description || undefined
+      });
+      const d = result.data;
+      setLabelForm((f) => ({
+        ...f,
+        description: d.description || f.description,
+        servingDescription: d.servingDescription || f.servingDescription,
+        servingGrams: d.servingGrams ?? f.servingGrams,
+        perServing: {
+          calories: d.perServing.calories,
+          protein: d.perServing.protein,
+          fibre: d.perServing.fibre,
+          carbohydrates: d.perServing.carbohydrates,
+          fat: d.perServing.fat
+        },
+        per100gDisplay: {
+          calories: d.per100g.calories,
+          protein: d.per100g.protein,
+          fibre: d.per100g.fibre,
+          carbohydrates: d.per100g.carbohydrates,
+          fat: d.per100g.fat
+        },
+        units: { calories: '100g', protein: '100g', fibre: '100g', carbohydrates: '100g', fat: '100g' },
+        novaGroup: d.novaGroup ?? f.novaGroup,
+        fruitVeg: d.fruitVeg ?? f.fruitVeg
+      }));
+      setLabelPhase('form');
+    } catch (err) {
+      setLabelError(err instanceof AiCallError ? describeReason(err) : 'unknown error');
+    } finally {
+      setLabelLoading(false);
+    }
+  }
+
+  async function handleLabelSave(andLog: boolean) {
+    setLabelSaving(true);
+    try {
+      const trimmedDescription = labelForm.description.trim() || 'Unnamed product';
+      if (!labelMatchPrompt) {
+        const existing = await db.foodItems.where('description').equalsIgnoreCase(trimmedDescription).first();
+        if (existing) {
+          setLabelMatchPrompt({ existingId: existing.id, andLog });
+          setLabelSaving(false);
+          return;
+        }
+      }
+      const andLogResolved = labelMatchPrompt ? labelMatchPrompt.andLog : andLog;
+      const now = Date.now();
+      const itemData = {
+        description: trimmedDescription,
+        servingDescription: labelForm.servingDescription.trim() || '1 serving',
+        caloriesPerServing: labelForm.perServing.calories ?? 0,
+        proteinPerServing: labelForm.perServing.protein,
+        fatPerServing: labelForm.perServing.fat,
+        carbohydratesPerServing: labelForm.perServing.carbohydrates,
+        fibrePerServing: labelForm.perServing.fibre,
+        caloriesPer100g: toPer100g(labelForm.per100gDisplay.calories, labelForm.units.calories),
+        proteinPer100g: toPer100g(labelForm.per100gDisplay.protein, labelForm.units.protein),
+        fatPer100g: toPer100g(labelForm.per100gDisplay.fat, labelForm.units.fat),
+        carbohydratesPer100g: toPer100g(labelForm.per100gDisplay.carbohydrates, labelForm.units.carbohydrates),
+        fibrePer100g: toPer100g(labelForm.per100gDisplay.fibre, labelForm.units.fibre),
+        novaGroup: labelForm.novaGroup,
+        fruitVeg: labelForm.fruitVeg,
+        servingGrams: labelForm.servingGrams,
+        source: 'ai-label' as FoodSource,
+        updatedAt: now
+      };
+
+      let id: string;
+      if (labelMatchPrompt) {
+        id = labelMatchPrompt.existingId;
+        await db.foodItems.update(id, itemData);
+      } else {
+        id = crypto.randomUUID();
+        await db.foodItems.add({ id, createdAt: now, barcode: null, servings: null, notes: null, useCount: 0, lastUsedAt: null, ...itemData });
+      }
+      if (andLogResolved) {
+        const item = await db.foodItems.get(id);
+        if (item) openLogSheet(item, day);
+      } else {
+        toast.show('Saved');
+      }
+      navigate(-1);
+    } finally {
+      setLabelSaving(false);
+    }
+  }
 
   // --- Query phase state ---
   const [description, setDescription] = useState(prefillDescription);
@@ -163,11 +324,112 @@ export function NewFoodAiScreen() {
     lockPer100g(field, per100gValue);
   }
 
+  if (mode === 'label') {
+    return (
+      <div className="flex flex-col min-h-full">
+        <ScreenHeader title="New Food from AI" back="back" />
+        <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
+          <AiModeToggle mode={mode} onChange={setMode} />
+
+          {labelPhase === 'capture' ? (
+            <>
+              <p className="text-sm" style={{ color: 'var(--fg-muted)' }}>
+                Take or upload a photo of the nutrition panel. The model reads the printed values — it won't estimate anything it can't see.
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  className="flex items-center justify-center gap-2 rounded-lg py-3 tap-target text-sm font-medium disabled:opacity-50"
+                  style={{ border: '1px solid var(--border)' }}
+                  disabled={labelLoading}
+                  onClick={() => labelCameraInputRef.current?.click()}
+                >
+                  <Camera size={18} strokeWidth={1.75} />
+                  {labelLoading ? 'Reading…' : 'Take photo'}
+                </button>
+                <button
+                  className="flex items-center justify-center gap-2 rounded-lg py-3 tap-target text-sm font-medium disabled:opacity-50"
+                  style={{ border: '1px solid var(--border)' }}
+                  disabled={labelLoading}
+                  onClick={() => labelLibraryInputRef.current?.click()}
+                >
+                  <ImageIcon size={18} strokeWidth={1.75} />
+                  {labelLoading ? 'Reading…' : 'Upload photo'}
+                </button>
+              </div>
+              <input ref={labelCameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleLabelPhoto} />
+              <input ref={labelLibraryInputRef} type="file" accept="image/*" className="hidden" onChange={handleLabelPhoto} />
+              {!settings.openRouterKey && (
+                <div className="rounded-lg p-3 text-sm flex items-center justify-between" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
+                  <span>No OpenRouter key set.</span>
+                  <button className="font-semibold" style={{ color: '#16a34a' }} onClick={() => navigate('/settings')}>
+                    Open Settings
+                  </button>
+                </div>
+              )}
+              {labelError && (
+                <div className="rounded-lg p-3 text-sm" style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b' }}>
+                  <div className="font-semibold">Error: unusable response</div>
+                  <div>{labelError}</div>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <FoodItemForm
+                state={labelForm}
+                onChange={setLabelForm}
+                calorieUnitLabel={settings.calorieUnits}
+                advancedOpen={labelAdvancedOpen}
+                onAdvancedOpenChange={setLabelAdvancedOpen}
+              />
+              {labelMatchPrompt && (
+                <div className="rounded-lg p-3 text-sm flex flex-col gap-2" style={{ background: '#fffbeb', border: '1px solid #fde68a' }}>
+                  <span>A Food Item with this exact description already exists. Update it instead of creating a duplicate?</span>
+                  <div className="flex gap-2">
+                    <button className="font-semibold" style={{ color: '#16a34a' }} onClick={() => handleLabelSave(labelMatchPrompt.andLog)}>
+                      Yes, update it
+                    </button>
+                    <button style={{ color: 'var(--fg-muted)' }} onClick={() => setLabelMatchPrompt(null)}>
+                      No, cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+        {labelPhase === 'form' && (
+          <div className="p-4 safe-bottom flex flex-col gap-2">
+            <button
+              className="w-full rounded-lg py-3 font-semibold text-white tap-target disabled:opacity-50"
+              style={{ background: '#16a34a' }}
+              disabled={labelSaving || !!labelMatchPrompt}
+              onClick={() => handleLabelSave(true)}
+            >
+              Save & Log
+            </button>
+            <button
+              className="w-full rounded-lg py-2.5 tap-target disabled:opacity-50"
+              style={{ border: '1px solid var(--border)' }}
+              disabled={labelSaving || !!labelMatchPrompt}
+              onClick={() => handleLabelSave(false)}
+            >
+              Save only
+            </button>
+          </div>
+        )}
+        {labelLoading && <LoadingOverlay message="Reading nutrition label…" />}
+      </div>
+    );
+  }
+
   if (!merged || phase === 'query') {
     return (
       <div className="flex flex-col min-h-full">
         <ScreenHeader title="New Food from AI" back="back" />
         <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
+          <AiModeToggle mode={mode} onChange={setMode} />
+
           <textarea
             autoFocus
             rows={4}
@@ -326,7 +588,7 @@ export function NewFoodAiScreen() {
         id: crypto.randomUUID(),
         createdAt: now,
         updatedAt: now,
-        timestamp: now,
+        timestamp: nowDate.getTime(),
         meal,
         description: merged!.description,
         calories: scaled.calories ?? 0,

@@ -1,36 +1,42 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Camera, Image as ImageIcon, ScanBarcode, X } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { ScanBarcode, X } from 'lucide-react';
 import { db } from '../db/db';
 import { ScreenHeader } from '../components/ScreenHeader';
-import { LoadingOverlay } from '../components/LoadingOverlay';
 import { FoodItemForm, emptyFoodFormState, toPer100g, type FoodFormState } from '../components/FoodItemForm';
 import { useSettings } from '../hooks/useSettings';
 import { useSheets } from '../components/SheetContext';
 import { useToast } from '../components/Toast';
 import { runBarcodeLadder } from '../lib/barcodeLadder';
 import { hasNativeBarcodeDetector, scanVideoStream, startCameraStream, decodeBarcodeFromFile, vibrateOnScan } from '../lib/barcodeScan';
-import { AiCallError, callLabelTranscription, downscaleImageToDataUrl } from '../lib/openrouter';
 import type { OffFoodItemDraft } from '../lib/openfoodfacts';
 
-export function NewFoodBarcodeScreen() {
+// Note: Open Food Facts text search (e.g. "search for X" by name) is not implemented yet — its
+// recommended API (search.openfoodfacts.org) doesn't send the CORS header a static, backend-free
+// PWA needs to call it directly from the browser, and the older name-search endpoint on the
+// CORS-enabled host is unreliable for anonymous callers. Barcode lookup is unaffected — the
+// product-by-barcode endpoint already in use here does send the right CORS header.
+
+export function NewFoodSearchScreen() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const navState = location.state as { day?: number; query?: string } | null;
+  const day = navState?.day;
   const settings = useSettings();
   const { openLogSheet } = useSheets();
   const toast = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const labelCameraInputRef = useRef<HTMLInputElement>(null);
-  const labelLibraryInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const [barcode, setBarcode] = useState('');
   const [scanning, setScanning] = useState(false);
   const [sourceLine, setSourceLine] = useState<{ label: string; url?: string } | null>(null);
-  const [labelError, setLabelError] = useState<string | null>(null);
-  const [labelLoading, setLabelLoading] = useState(false);
-  const [lastSource, setLastSource] = useState<'manual' | 'ai-label' | 'openfoodfacts'>('manual');
+  const [lastSource, setLastSource] = useState<'manual' | 'openfoodfacts'>('manual');
 
-  const [form, setForm] = useState<FoodFormState>(emptyFoodFormState());
+  // There's no working Open Food Facts text search yet (see the note above the component), so a
+  // query carried from the Add screen currently just seeds the manual-entry description below,
+  // rather than searching anything.
+  const [form, setForm] = useState<FoodFormState>(() => ({ ...emptyFoodFormState(), description: navState?.query ?? '' }));
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -94,14 +100,14 @@ export function NewFoodBarcodeScreen() {
   async function runLadder(code: string) {
     const result = await runBarcodeLadder(code, settings.offEnabled);
     if (result.rung === 'local') {
-      openLogSheet(result.item);
+      openLogSheet(result.item, day);
       navigate(-1);
       return;
     }
     if (result.rung === 'openfoodfacts') {
       applyOffDraft(result.draft);
     }
-    // miss: leave form for label photo or manual entry
+    // miss: leave form for manual entry
   }
 
   async function handleStillPhoto(e: React.ChangeEvent<HTMLInputElement>) {
@@ -126,56 +132,6 @@ export function NewFoodBarcodeScreen() {
       await runLadder(code);
     } else {
       toast.show('Could not read a barcode from that photo');
-    }
-  }
-
-  async function handleLabelPhoto(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!settings.openRouterKey) {
-      toast.show('Set an OpenRouter key in Settings first');
-      return;
-    }
-    const model = settings.models.find((m) => m.id === settings.labelModel);
-    if (!model) {
-      toast.show('Set a label transcription model in Settings first');
-      return;
-    }
-    setLabelLoading(true);
-    setLabelError(null);
-    try {
-      const dataUrl = await downscaleImageToDataUrl(file);
-      const result = await callLabelTranscription({ apiKey: settings.openRouterKey, model, imageBase64: dataUrl, productDescription: form.description || undefined });
-      const d = result.data;
-      setForm((f) => ({
-        ...f,
-        description: d.description || f.description,
-        servingDescription: d.servingDescription || f.servingDescription,
-        servingGrams: d.servingGrams ?? f.servingGrams,
-        perServing: {
-          calories: d.perServing.calories,
-          protein: d.perServing.protein,
-          fibre: d.perServing.fibre,
-          carbohydrates: d.perServing.carbohydrates,
-          fat: d.perServing.fat
-        },
-        per100gDisplay: {
-          calories: d.per100g.calories,
-          protein: d.per100g.protein,
-          fibre: d.per100g.fibre,
-          carbohydrates: d.per100g.carbohydrates,
-          fat: d.per100g.fat
-        },
-        units: { calories: '100g', protein: '100g', fibre: '100g', carbohydrates: '100g', fat: '100g' },
-        novaGroup: d.novaGroup ?? f.novaGroup,
-        fruitVeg: d.fruitVeg ?? f.fruitVeg
-      }));
-      setSourceLine(null);
-      setLastSource('ai-label');
-    } catch (err) {
-      setLabelError(err instanceof AiCallError ? err.message : 'Unusable response');
-    } finally {
-      setLabelLoading(false);
     }
   }
 
@@ -221,7 +177,7 @@ export function NewFoodBarcodeScreen() {
       });
       if (andLog) {
         const item = await db.foodItems.get(id);
-        if (item) openLogSheet(item);
+        if (item) openLogSheet(item, day);
       } else {
         toast.show('Saved');
       }
@@ -233,7 +189,7 @@ export function NewFoodBarcodeScreen() {
 
   return (
     <div className="flex flex-col min-h-full">
-      <ScreenHeader title="New Food from Barcode" back="back" />
+      <ScreenHeader title="Search" back="back" />
       <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
         {scanning ? (
           <div className="relative rounded-lg overflow-hidden" style={{ background: 'black' }}>
@@ -281,39 +237,6 @@ export function NewFoodBarcodeScreen() {
           </div>
         )}
 
-        <div>
-          <div className="text-xs mb-1" style={{ color: 'var(--fg-muted)' }}>
-            Nutrition label (optional)
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              className="flex items-center justify-center gap-2 rounded-lg py-3 tap-target text-sm font-medium disabled:opacity-50"
-              style={{ border: '1px solid var(--border)' }}
-              disabled={labelLoading}
-              onClick={() => labelCameraInputRef.current?.click()}
-            >
-              <Camera size={18} strokeWidth={1.75} />
-              {labelLoading ? 'Reading…' : 'Take photo'}
-            </button>
-            <button
-              className="flex items-center justify-center gap-2 rounded-lg py-3 tap-target text-sm font-medium disabled:opacity-50"
-              style={{ border: '1px solid var(--border)' }}
-              disabled={labelLoading}
-              onClick={() => labelLibraryInputRef.current?.click()}
-            >
-              <ImageIcon size={18} strokeWidth={1.75} />
-              {labelLoading ? 'Reading…' : 'Upload photo'}
-            </button>
-          </div>
-          <input ref={labelCameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleLabelPhoto} />
-          <input ref={labelLibraryInputRef} type="file" accept="image/*" className="hidden" onChange={handleLabelPhoto} />
-          {labelError && (
-            <div className="mt-2 rounded-lg p-2 text-xs" style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b' }}>
-              Error: unusable response — {labelError}
-            </div>
-          )}
-        </div>
-
         <FoodItemForm
           state={form}
           onChange={setForm}
@@ -335,7 +258,6 @@ export function NewFoodBarcodeScreen() {
           Save only
         </button>
       </div>
-      {labelLoading && <LoadingOverlay message="Reading nutrition label…" />}
     </div>
   );
 }

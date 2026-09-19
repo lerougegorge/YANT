@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Plus, UtensilsCrossed } from 'lucide-react';
@@ -50,10 +50,31 @@ export function HomeScreen() {
   const groups = useMemo(() => groupByMeal(instances ?? [], meals), [instances, meals]);
   const dayTotals = useMemo(() => computeTotals(instances ?? []), [instances]);
 
-  const isToday = isSameDay(date, new Date());
+  // "isToday" is otherwise only ever recomputed when something else causes a re-render, so a
+  // tab left open and idle across midnight would keep showing yesterday as "today" until the
+  // user next interacted with it. Re-check on a timer and whenever the tab regains focus, which
+  // also covers the common case of an installed PWA left locked overnight.
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const tick = () => setNow(new Date());
+    const interval = setInterval(tick, 60_000);
+    document.addEventListener('visibilitychange', tick);
+    window.addEventListener('focus', tick);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', tick);
+      window.removeEventListener('focus', tick);
+    };
+  }, []);
+  const isToday = isSameDay(date, now);
 
   function handleTouchStart(e: React.TouchEvent) {
-    touchStartX.current = e.touches[0].clientX;
+    // A pinch starts a second touch partway through the gesture; treat anything but a single
+    // finger as "not a swipe" so pinch-to-zoom never gets misread as a day change.
+    touchStartX.current = e.touches.length === 1 ? e.touches[0].clientX : null;
+  }
+  function handleTouchMove(e: React.TouchEvent) {
+    if (e.touches.length > 1) touchStartX.current = null;
   }
   function handleTouchEnd(e: React.TouchEvent) {
     if (touchStartX.current === null) return;
@@ -117,7 +138,7 @@ export function HomeScreen() {
         </div>
       )}
 
-      <div className="flex-1" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+      <div className="flex-1" onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
         {(instances ?? []).length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 py-24 px-6 text-center">
             <UtensilsCrossed size={40} strokeWidth={1.5} style={{ color: 'var(--fg-muted)' }} />
@@ -161,7 +182,7 @@ export function HomeScreen() {
       <button
         className="fixed bottom-6 right-6 h-14 w-14 rounded-full text-white shadow-lg flex items-center justify-center z-30"
         style={{ background: '#16a34a' }}
-        onClick={() => navigate('/add')}
+        onClick={() => navigate('/add', { state: { day: date.getTime() } })}
         aria-label="Add food"
       >
         <Plus size={28} strokeWidth={2} />

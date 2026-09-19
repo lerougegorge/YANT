@@ -107,9 +107,9 @@ Shows eating for the day with a table of items in chronological order, and total
 - **Three action buttons** below the suggestions:
   - **AI** — opens New Food from AI, carrying any typed text across as the starting description.
   - **Quick Add** — opens the Quick Add Screen.
-  - **Barcode** — opens New Food from Barcode.
+  - **Search** — opens New Food from Search (barcode scan, or manual/Open Food Facts lookup).
 - The AI button is labelled "AI" with a sparkle-style icon, **not** a camera, because a photo is optional and often unnecessary.
-- If the typed text matches nothing, the last suggestion row reads "Quick add '<typed text>'", carrying the text through as the description.
+- **Trailing rows.** Whenever the query is non-empty, two rows follow whatever Food Item suggestions matched (even if some did): *"Quick add '<typed text>'"* and *"Search for '<typed text>'"*, carrying the text through as the starting description on the respective screen. These exist so a food that doesn't match anything logged before — a new packaged product, a new staple — is never a dead end at the search field itself.
 
 ### Log Sheet (shared component)
 
@@ -124,6 +124,10 @@ Used whenever an existing Food Item is being logged. A bottom sheet, not a full 
 
 ### New Food from AI — Query
 
+The screen opens on a two-way toggle — **Analyse food** / **Scan label** — defaulting to Analyse food. Photo analysis is the large majority of AI use, so this is a lightweight, always-visible toggle rather than a screen the user must answer before anything renders; nobody doing the common case sees any change from before the toggle existed. Switching to Scan label swaps the fields below for the label-scanning flow (below); it is not a third prompt or a merge of the two — see "Two call types" for why these stay separate.
+
+**Analyse food** (default):
+
 Text is the primary input; a photo is optional. Either alone is sufficient; both together give the best result.
 
 - **Description field** — large, multi-line, focused on open, pre-filled with anything typed on the Add Screen. Placeholder text should teach by example, showing one of: *"two slices of funghi pizza, about 60g total"*, *"a flat white with oat milk from a coffee shop"*, *"roasted chicken thigh with skin, about 150g raw"*.
@@ -136,9 +140,19 @@ Text is the primary input; a photo is optional. Either alone is sufficient; both
 - **In flight:** an inline progress state on the Analyse button. The screen is not replaced until a valid response arrives, so a failure has somewhere to return to.
 - **Failure:** the screen stays where it is and shows an inline error box — *"Error: unusable response"* — with the underlying reason beneath it (no response, timed out, rate limited, response could not be read). The description, photo and model selection are all preserved untouched, so the user can edit the description, pick a different model, and press Analyse again. Nothing is lost and no separate recovery path is needed.
 
+**Scan label:**
+
+Reached via the toggle above. Resolves the open question of whether the AI path needs a barcode-free packaged-food route (a packaged item with a damaged or unreadable barcode has nowhere else to go for AI transcription) — see "Resolved Decisions".
+
+- A photo is required; there is no text-only path, since there is nothing to transcribe without one. **Take photo** / **Upload photo** buttons, matching the Analyse food screen's visual weight.
+- Calls Label Transcription (not Food Estimate) against the single **Default AI model for label transcription** from Preferences — no model picker, since label scanning is a transcription task with a correct answer.
+- **Success** populates an editable form identical in shape to the New Food from Search form (description, serving description, per-serving macros, and per-100g/oz Advanced section) — the same "form, not a result card" principle as Analyse food. Actions: **Save & Log** / **Save only**, matching the Search screen. If an existing Food Item's description matches exactly, the user is asked whether to update it instead, as elsewhere.
+- **Failure:** inline *"Error: unusable response"* box; the screen stays on the capture step, ready to retry.
+- No second opinion flow — see "Two call types".
+
 ### New Food from AI — Results
 
-**This screen is an editable form, not a result card.** The AI response populates the same input fields the user would otherwise have filled in by hand, and every one of them can be edited before anything is saved. There is no separate "accept" step and no manual-entry fallback screen, because the form *is* the manual-entry screen — it simply arrives pre-filled. This also makes it structurally identical to the barcode screen's form, which is populated from Open Food Facts or a label scan by the same principle.
+**This screen is an editable form, not a result card.** The AI response populates the same input fields the user would otherwise have filled in by hand, and every one of them can be edited before anything is saved. There is no separate "accept" step and no manual-entry fallback screen, because the form *is* the manual-entry screen — it simply arrives pre-filled. This also makes it structurally identical to the Search screen's form (populated from Open Food Facts) and to the Scan label form under this same AI screen (populated from a label photo) — all three are the same editable form, arrived at by different routes.
 
 **Always a single consolidated item, never a breakdown.** A photo of an airline tray returns one item — *"airline meal: pasta, roll and dessert"* — with combined totals. Multi-item decomposition is explicitly out of scope; if the user wants separate rows they run two analyses or edit the description.
 
@@ -152,7 +166,7 @@ Text is the primary input; a photo is optional. Either alone is sufficient; both
 
 **Advanced section** (collapsed by default, expandable):
 
-- Per 100g / oz values for calories and each macronutrient, with the same unit dropdown behaviour as the barcode screen.
+- Per 100g / oz values for calories and each macronutrient, with the same unit dropdown behaviour as the Search screen.
 - Total prepared weight, servings, and weight per serving.
 - **Processing group** (NOVA 1–4) segmented control.
 - **Five a Day** checkbox.
@@ -204,20 +218,24 @@ Practical consequences:
 - **Meal** and **time**, defaulted from the current time.
 - Action: **Log**. Quick Add creates a Food Instance only; it never creates a Food Item.
 
-### New Food from Barcode Screen
+### New Food from Search Screen
 
-The lookup ladder runs cheapest-first. Each rung is tried only if the one above returns nothing.
+Reached via the **Search** button on the Add Screen (previously labelled "Barcode" — renamed because it is no longer only a barcode entry point; see "Resolved Decisions"). This screen is purely deterministic lookups plus manual entry — it makes no AI call. Label-photo transcription lives entirely under New Food from AI now (Scan label), so that the AI screen is the one place all AI-derived identification happens, and this screen never needs its own inline AI error/loading states.
+
+The barcode lookup ladder runs cheapest-first. Each rung is tried only if the one above returns nothing.
 
 1. **Local Food Items** — match on the `barcode` index. On a hit, skip everything and go straight to the Log Sheet. No network, no AI, no typing.
 2. **Open Food Facts** — see "Open Food Facts integration" below. On a hit, populate the form and show a source line: *"From Open Food Facts"* with a link to the product page, since crowd-sourced data is sometimes wrong and the user should be able to check.
-3. **Nutrition label photo → AI** — the user photographs the panel and a model transcribes it.
-4. **Manual entry.**
+3. **Manual entry.**
+
+A damaged or unreadable barcode, or a packaged item you'd rather not scan, falls through to manual entry here, or to AI (Analyse food from a description, or Scan label from a photo of the panel) as a separate path from the Add Screen.
+
+**Text search of Open Food Facts by name is not implemented — see "Open Food Facts Integration" for why.** Until that's resolved, "Search for X" from the Add Screen lands on this screen with the description pre-filled for manual entry, rather than actually searching anything.
 
 Screen contents:
 
 - **Button to scan the barcode.** Opens a live camera view with a scan reticle where supported; falls back to a still photo. On successful decode, haptic feedback, the number populates the field, and the ladder above runs automatically.
 - **Text of barcode (number)** with placeholder in italics: *"Please start by scanning a barcode"*. Also manually editable, for damaged or unreadable codes.
-- **Nutrition Label (optional)** — button to supply a photo of the label, sent to the label transcription model. Returned values populate the fields below, which remain editable. The photo is discarded after the call. On failure, an inline *"Error: unusable response"* box appears and the form is left as it was, ready for manual entry or another attempt.
 - **Description:** text field.
 - **Serving description:** text field, default "1 serving". Barcode products usually state a serving on the pack, and Open Food Facts often supplies it.
 - **Calories per serving:** number input.
@@ -239,7 +257,7 @@ Action: **Save & Log** (creates the Food Item and logs one serving), with a seco
 ### Foods Screen (food item library)
 
 - Searchable, alphabetical list of all Food Items, with calories per serving as the secondary line and a small badge for AI-estimated entries.
-- Tap to edit; the edit form is the barcode screen's form minus the scanning controls.
+- Tap to edit; the edit form is the Search screen's form minus the scanning controls.
 - Swipe to delete. Deleting a Food Item does **not** delete or alter past Food Instances, since instances store their own copies of the values. Warn about this once.
 - Sort options: alphabetical, most used, recently added.
 - Filter: all / AI-estimated / from barcode / manual.
@@ -389,7 +407,7 @@ There are exactly two prompts in the application:
 | Call | Used by | Task |
 |---|---|---|
 | **Food Estimate** | New Food from AI | Estimation. Identify a food from a description, a photo, or both, and estimate its nutrition. |
-| **Label Transcription** | New Food from Barcode | Transcription. Read the printed values off a nutrition panel. |
+| **Label Transcription** | New Food from AI (Scan label) | Transcription. Read the printed values off a nutrition panel. |
 
 They are separate because the tasks are opposed. Estimation rewards a model for inferring what is not stated; transcription requires it to invent nothing. A single prompt trying to do both produces a model that quietly fills in gaps on a label photo, which is the worst possible failure — a fabricated number that looks authoritative because it came from a photograph of a package.
 
@@ -626,7 +644,7 @@ OUTPUT SCHEMA
 [identical to the Food Estimate schema]
 ```
 
-**User message:** the label image, plus the fixed text *"Transcribe the nutrition panel in this image."* If the user has already typed a product description on the barcode screen, append it as context: *"The product is described as: <description>."*
+**User message:** the label image, plus the fixed text *"Transcribe the nutrition panel in this image."* If a product description is already present on screen — from a prior attempt on this same item — append it as context: *"The product is described as: <description>."*
 
 ### Prompt maintenance notes
 
@@ -653,9 +671,9 @@ GET https://world.openfoodfacts.org/api/v2/product/{barcode}
     ?fields=product_name,brands,quantity,serving_size,serving_quantity,nutriments,nova_group,categories_tags
 ```
 
-`status: 1` indicates a hit; `status: 0` means not found and should fall through to the label-photo rung silently, not as an error.
+`status: 1` indicates a hit; `status: 0` means not found and should fall through to manual entry silently, not as an error.
 
-**Verify CORS from the browser** during the first spike. Open Food Facts is widely consumed from web clients and this is expected to work, but a static PWA has no proxy to fall back on if it does not, so confirm before building the flow around it.
+**CORS verified from the browser.** This endpoint sends `Access-Control-Allow-Origin: *`, confirmed directly, so it works from a static PWA with no proxy as expected. **This does not extend to Open Food Facts' text-search APIs** — see Open Question #5 for a name-search endpoint that was checked the same way and found blocked.
 
 **Field mapping to our Food Item:**
 
@@ -722,6 +740,8 @@ For the record, and to stop them being reopened during implementation:
 11. **AI failure handling:** an inline "Error: unusable response" box with the underlying reason, and the query screen retained with all inputs intact. No navigation away, nothing lost.
 12. **Carbohydrates exclude fibre**, per EU/UK convention. US-format labels are normalised at transcription time.
 13. **Two prompts only:** Food Estimate and Label Transcription. The estimate call branches client-side on which inputs are present.
+14. **Label Transcription is reached from the AI screen, not the barcode/search screen** (resolves the barcode-free packaged-food question below): the New Food from AI screen opens on an Analyse food / Scan label toggle, defaulting to Analyse food since photo analysis is the large majority of AI use. This keeps every AI call behind one entry point and lets a packaged item with no usable barcode reach label transcription directly. The Barcode screen is renamed **Search** and left with only deterministic lookups (local Food Items, Open Food Facts by barcode) plus manual entry — no AI call of its own.
+15. **Add screen trailing suggestions:** once the search query is non-empty, "Quick add '<query>'" and "Search for '<query>'" always follow whatever Food Item matches were found, not only when there were none. A food that doesn't match anything logged before should never be a dead end at the search field.
 
 ## Remaining Open Questions
 
@@ -729,4 +749,4 @@ For the record, and to stop them being reopened during implementation:
 2. **What should the default models be?** Cheap models handle text-only estimation adequately; photos need a capable vision model. Ship with a suggested pairing that is clearly labelled and easily changed, or force an explicit choice on first run? The former seems better than an empty state that blocks first use.
 3. **Should the AI be given the user's recent Food Items as context** so it reuses their descriptions and stays consistent? Improves coherence, increases token cost on every call.
 4. **Should a model that repeatedly falls outside consensus be demoted?** The app could track, per model, how often its per-100g calories land far from the median, and surface that in the model picker. Genuinely useful over months, but it is a new persisted statistic and a new screen, and it may be over-engineering for a personal tool.
-5. **Does the AI path need a barcode-free packaged-food route?** Currently a packaged item with an unreadable barcode goes to the label-photo rung inside the barcode screen, which is slightly odd since there is no barcode. Possibly the label-scan option belongs on the AI screen too.
+5. **How should Open Food Facts text search be delivered, if at all?** Investigated for the Search screen and found blocked as specified: `search.openfoodfacts.org` (Search-a-licious, the API OFF's own docs recommend) does not send an `Access-Control-Allow-Origin` header, so a browser blocks reading its response from a static, backend-free PWA — confirmed directly (repeated requests came back with no CORS header, from any origin), not just suspected. The older name-search endpoint on the CORS-enabled `world.openfoodfacts.org` host works only intermittently — it returned valid, relevant results once in testing and a 503 "not available to anonymous users" on every following attempt — consistent with it being deprecated in OFF's own documentation. Barcode lookup is unaffected; only free-text search is blocked. Options, none yet chosen: (a) leave text search unbuilt and rely on barcode scan + the AI text flow, which already covers unbranded staples well; (b) add a minimal serverless proxy in front of Search-a-licious, which reintroduces a backend the project's "no backend to pay for" principle currently avoids; (c) route through a third-party public CORS relay, which adds an undisclosed data recipient the About screen's "nothing else, ever" data statement does not currently account for. Until resolved, the Add screen's "Search for X" suggestion opens the Search screen with the text pre-filled as a manual-entry description, not as a search.

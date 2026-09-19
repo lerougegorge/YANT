@@ -3,6 +3,7 @@ import type { AmountUnit, FoodItem } from '../db/types';
 import { useMeals } from '../hooks/useMeals';
 import { useSettings } from '../hooks/useSettings';
 import { useDefaultMeal } from '../hooks/useDefaultMeal';
+import { defaultLogTime } from '../lib/date';
 import { computeScaledNutrition, logFoodItem } from '../lib/logging';
 import { formatCalories, formatNutrient } from '../lib/units';
 import { BottomSheet } from './BottomSheet';
@@ -10,12 +11,23 @@ import { AmountControl } from './AmountControl';
 import { MealSelect } from './MealSelect';
 import { useToast } from './Toast';
 
-export function LogSheet({ item, onClose, onLogged }: { item: FoodItem; onClose: () => void; onLogged?: () => void }) {
+export function LogSheet({
+  item,
+  day,
+  onClose,
+  onLogged
+}: {
+  item: FoodItem;
+  /** Calendar day (epoch ms) being logged against, from the Home screen; defaults to today. */
+  day?: number;
+  onClose: () => void;
+  onLogged?: () => void;
+}) {
   const meals = useMeals();
   const settings = useSettings();
   const toast = useToast();
 
-  const nowDate = useMemo(() => new Date(), []);
+  const nowDate = useMemo(() => defaultLogTime(day !== undefined ? new Date(day) : new Date()), [day]);
   const [amount, setAmount] = useState(1);
   const [amountUnit, setAmountUnit] = useState<AmountUnit>('servings');
   const [meal, setMeal] = useDefaultMeal(meals, nowDate);
@@ -26,7 +38,7 @@ export function LogSheet({ item, onClose, onLogged }: { item: FoodItem; onClose:
   async function handleLog() {
     setSaving(true);
     try {
-      await logFoodItem(item, { meal, timestamp: Date.now(), amount, amountUnit });
+      await logFoodItem(item, { meal, timestamp: nowDate.getTime(), amount, amountUnit });
       toast.show(`Logged ${item.description}`);
       onLogged?.();
       onClose();
